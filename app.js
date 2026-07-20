@@ -1185,6 +1185,23 @@ function checkAchievements(ctx = {}) {
     'xp_2000':        state.totalXp >= 2000,
     'level_5':        state.level >= 5,
     'quiz_master':    (state.quizzesCompleted || 0) >= 10,
+    // ─── v2 ───
+    'lessons_50':     state.lessonsCompleted >= 50,
+    'lessons_100':    state.lessonsCompleted >= 100,
+    'streak_14':      state.streak >= 14,
+    'streak_100':     state.streak >= 100,
+    'xp_5000':        state.totalXp >= 5000,
+    'xp_10000':       state.totalXp >= 10000,
+    'level_10':       state.level >= 10,
+    'level_20':       state.level >= 20,
+    'scenarios_10':   state.scenariosCompleted.length >= 10,
+    'scenarios_25':   state.scenariosCompleted.length >= 25,
+    'quiz_5':         (state.quizzesCompleted || 0) >= 5,
+    'quiz_25':        (state.quizzesCompleted || 0) >= 25,
+    'srs_100':        Object.keys(state.srs || {}).length >= 100,
+    'srs_300':        Object.keys(state.srs || {}).length >= 300,
+    'vocab_explorer': Object.keys(state.vocabProgress || {}).length >= 10,
+    'goal_reached':   state.dailyXp >= (state.dailyGoal || 50),
   };
   const newlyUnlocked = [];
   for (const [id, met] of Object.entries(conditions)) {
