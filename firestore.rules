@@ -7,9 +7,11 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
-    // Subscriptions — read only for authenticated users
+    // Subscriptions — читать может ТОЛЬКО владелец записи (doc id = его email).
+    // Раньше было `if request.auth != null` → любой залогиненный видел чужие
+    // подписки и почты (мелкая утечка). Код читает только свой email, не ломается.
     match /subscriptions/{email} {
-      allow read: if request.auth != null;
+      allow read: if request.auth != null && request.auth.token.email == email;
       allow write: if false;
     }
 
