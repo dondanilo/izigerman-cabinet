@@ -1,16 +1,16 @@
 // ============================================================
 // FIREBASE
 // ============================================================
-// TODO: значения ниже — от проекта izi-turkish. Создать НОВЫЙ проект Firebase
-// (Authentication → Google + Firestore) и подставить его config, иначе пользователи
-// IziGerman будут писаться в базу IziTurkish.
+// Firebase-проект izi-german (создан 2026-09-07, project number 798454813636).
+// Тот же проект обслуживает и веб-кабинет, и iOS-приложение (в WKWebView вход
+// делает этот же веб-SDK; нативный плагин лишь приносит токен, skipNativeAuth).
 const firebaseConfig = {
-  apiKey: "TODO_FIREBASE_API_KEY",
+  apiKey: "AIzaSyBRKlmLiiTchhsGmyXZUJt8x64SYSfPQ6Y",
   authDomain: "izi-german.firebaseapp.com",
   projectId: "izi-german",
   storageBucket: "izi-german.firebasestorage.app",
-  messagingSenderId: "TODO_SENDER_ID",
-  appId: "TODO_APP_ID"
+  messagingSenderId: "798454813636",
+  appId: "1:798454813636:web:916c01bc656ba12196ca91"
 };
 
 firebase.initializeApp(firebaseConfig);
