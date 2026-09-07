@@ -23,6 +23,10 @@
   --text-light: #777777;
   --white: #FFFFFF;
   --radius: 16px;
+  /* Основной акцент. Шаблон кабинета спроектирован под зелёный (подложки #f0fff4,
+     белый текст на .paywall-btn-primary/.paywall-plan-badge). Немецкое золото
+     #FFCE00 здесь дало бы «белое на белом» — тот же баг, что валил серба/испанца. */
+  --primary: #58CC02;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -1138,6 +1142,30 @@ body {
   cursor: pointer;
 }
 .settings-version { text-align: center; font-size: 12px; color: #ccc; padding: 16px 0 8px; }
+
+/* ==================== iOS: вход через Apple + удаление аккаунта ==================== */
+.btn-apple-login {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; margin-top: 12px; padding: 15px 28px;
+  background: #000; color: #fff;
+  border: none; border-radius: 14px;
+  font-family: 'Nunito', sans-serif; font-size: 16px; font-weight: 700;
+  cursor: pointer; box-shadow: 0 3px 0 #333;
+  transition: transform 0.08s, box-shadow 0.08s;
+}
+.btn-apple-login:active { transform: translateY(3px); box-shadow: none; }
+.btn-apple-login:disabled { opacity: .6; cursor: default; }
+.apple-svg { flex-shrink: 0; margin-top: -2px; }
+
+/* Кнопка «Удалить аккаунт» (App Store 5.1.1(v)) */
+.btn-delete-account {
+  width: 100%; padding: 14px; margin-top: 10px;
+  background: var(--red); color: #fff;
+  border: none; border-radius: 14px;
+  font-family: 'Nunito', sans-serif; font-size: 15px; font-weight: 800;
+  cursor: pointer;
+}
+.btn-delete-account:disabled { opacity: .6; cursor: default; }
 
 /* ============================================================ AUTH LOADING */
 .auth-loading-container {
