@@ -333,6 +333,76 @@ function finishOnboarding() {
   setTimeout(setupPushNotifications, 2000);
 }
 
+// ============================================================
+// ГОСТЕВОЙ РЕЖИМ + ПРОБНЫЕ УРОКИ
+// ============================================================
+const TRIAL_LESSONS = 5; // сколько уроков доступно гостю без входа/подписки
+let hasSubscription = false;
+let pendingUpgrade = false; // гость нажал «оформить» → после входа сразу пэйволл
+
+// Пропускать ли в контент. Гостю дан пробник, дальше — окно с объяснением.
+// Прогресс гостя живёт в localStorage и переносится в новый аккаунт при входе.
+function trialGate() {
+  if (hasSubscription) return true;
+  if ((state.lessonsCompleted || 0) < TRIAL_LESSONS) return true;
+  showTrialModal();
+  return false;
+}
+
+function showTrialModal() {
+  const cta = document.getElementById('trial-cta');
+  if (cta) cta.textContent = currentUser ? 'Выбрать план' : 'Войти и открыть доступ';
+  const m = document.getElementById('trial-modal');
+  if (m) m.style.display = 'flex';
+}
+
+function dismissTrialModal() {
+  const m = document.getElementById('trial-modal');
+  if (m) m.style.display = 'none';
+}
+
+function trialUpgrade() {
+  dismissTrialModal();
+  if (currentUser) {
+    showPaywall();          // вошёл — сразу планы
+  } else {
+    pendingUpgrade = true;  // гость — сперва вход, после него откроем пэйволл
+    showLoginPromo();
+  }
+}
+
+// Кнопка «Не сейчас» на экране входа — только гостю, уже прошедшему онбординг
+// (на самом первом запуске уходить с экрана входа некуда).
+function updateLoginBackBtn() {
+  const back = document.getElementById('login-back-btn');
+  if (back) back.style.display = state.onboardingDone ? 'block' : 'none';
+}
+
+function showLoginPromo() {
+  const sub = document.querySelector('#screen-login .login-subtitle');
+  if (sub) sub.textContent = 'Бесплатные уроки пройдены. Войди, чтобы продолжить и сохранить прогресс.';
+  updateLoginBackBtn();
+  showScreen('screen-login');
+}
+
+// Обычный вход по кнопке «Войти» на главной — ведём на экран входа с обоими
+// провайдерами (Google + Apple), а не сразу в Google (гайдлайн 4.8).
+function showLogin() {
+  const sub = document.querySelector('#screen-login .login-subtitle');
+  if (sub) sub.textContent = 'Войди, чтобы прогресс сохранился на всех устройствах';
+  updateLoginBackBtn();
+  showScreen('screen-login');
+}
+
+// Гость: показываем «Войти», прячем аватар. Вошедший — наоборот.
+function updateGuestUi() {
+  const isGuest = !currentUser;
+  const loginBtn = document.getElementById('guest-login-btn');
+  const avatarBtn = document.getElementById('user-avatar-btn');
+  if (loginBtn) loginBtn.style.display = isGuest ? 'inline-flex' : 'none';
+  if (avatarBtn) avatarBtn.style.display = isGuest ? 'none' : 'inline-flex';
+}
+
 // TODO: сгенерировать свою пару ключей: npx web-push generate-vapid-keys
 // Публичный — сюда, приватный — в переменные окружения Vercel (в код не класть).
 // Ключ ниже принадлежит IziTurkish: с ним push-подписки будут невалидны.
@@ -648,33 +718,36 @@ async function init() {
     }
   }
 
-  // Подписываемся на состояние авторизации
+  // Подписываемся на состояние авторизации.
+  // Гость (user === null) больше НЕ упирается в экран входа — он попадает на
+  // главную и получает пробные уроки (TRIAL_LESSONS). Вход/подписка требуются
+  // только когда пробник исчерпан (trialGate → showTrialModal).
   auth.onAuthStateChanged(async user => {
-    if (user) {
-      currentUser = user;
-      await loadState();
-      await saveUserEmail();
-      checkStreak();
-      renderUserInfo();
+    currentUser = user || null;
+    await loadState();
+    checkStreak();
+    renderUserInfo();
+    updateGuestUi();
 
-      const hasAccess = await checkSubscription();
-      if (hasAccess) {
-        renderHome();
-        if (!state.onboardingDone) {
-          showScreen('screen-onboarding');
-        } else {
-          showScreen('screen-home');
-          // Silently refresh push subscription for returning users
-          if (pushPermission() === 'granted') {
-            setTimeout(setupPushNotifications, 3000);
-          }
-        }
-      } else {
-        showPaywall();
-      }
+    if (user) {
+      await saveUserEmail();
+      hasSubscription = await checkSubscription();
     } else {
-      currentUser = null;
-      showScreen('screen-login');
+      hasSubscription = false; // гость: локальный state, доступ по пробнику
+    }
+
+    renderHome();
+    if (!state.onboardingDone) {
+      showScreen('screen-onboarding');
+    } else if (user && !hasSubscription && pendingUpgrade) {
+      pendingUpgrade = false;
+      showPaywall();          // гость вошёл ради оформления — показываем планы
+    } else {
+      showScreen('screen-home');
+      // Тихо обновляем подписку на пуши у вошедших с доступом
+      if (user && hasSubscription && pushPermission() === 'granted') {
+        setTimeout(setupPushNotifications, 3000);
+      }
     }
   });
 }
@@ -841,12 +914,14 @@ function shuffle(arr) { return [...arr].sort(() => Math.random() - 0.5); }
 // LESSON — FLOW
 // ============================================================
 function startLesson() {
+  if (!trialGate()) return;
   const mods = getLessonModules();
   const num = Math.min(state.currentLesson || 1, mods.length);
   startTeachPhase(mods[num - 1]);
 }
 
 function startWeakLesson() {
+  if (!trialGate()) return;
   const weakIds = Object.keys(state.errorLog)
     .sort((a, b) => state.errorLog[b] - state.errorLog[a])
     .map(id => parseInt(id));
@@ -1223,6 +1298,7 @@ function buildSrsPool() {
 }
 
 function startSrsLesson() {
+  if (!trialGate()) return;
   const dueVerbs = getSrsDueVerbs();
   if (dueVerbs.length === 0) return;
   const pool = dueVerbs.length >= 2 ? dueVerbs : null;
@@ -1383,6 +1459,269 @@ function playSound(type) {
 }
 
 // ============================================================
+// КАРТОЧКИ (FLASHCARDS) — темы, голосование Знаю/Не знаю, авто-просмотр
+// Портировано из IziGreek на нашем контенте VOCAB_CATEGORIES. Поле карточки
+// называется greek по историческим причинам — здесь оно содержит немецкое слово.
+// Списки открыты всем, само занятие требует пробника/подписки (trialGate).
+// ============================================================
+const FC_BATCH = 10; // пауза «продолжим/хватит» каждые 10 слов
+let fcState = {
+  catId: null, cat: null, dir: 'de2ru', mode: 'vote',
+  queue: [], words: [], index: 0, know: 0, dont: 0, revealed: false, currentWord: null,
+  viewTimer: null, viewPlaying: false, viewSpeed: 1, resume: false,
+};
+
+function fcPluralWords(n) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return 'слово';
+  if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return 'слова';
+  return 'слов';
+}
+
+function showFlashBreak() {
+  stopFlashView();
+  document.getElementById('fc-break-count').textContent = fcState.index;
+  document.getElementById('fc-break-modal').style.display = 'flex';
+  try { playSound('complete'); } catch (e) {}
+}
+function continueFlashBatch() {
+  document.getElementById('fc-break-modal').style.display = 'none';
+  fcState.resume = true;
+  if (fcState.mode === 'view') {
+    fcState.viewPlaying = true;
+    document.getElementById('fc-view-play').textContent = '⏸';
+    renderFlashViewCard();
+  } else {
+    renderFlashVote();
+  }
+}
+function endFlashSession() {
+  document.getElementById('fc-break-modal').style.display = 'none';
+  stopFlashView();
+  showFlashDeck(fcState.catId);
+}
+
+function fcCat(id) { return VOCAB_CATEGORIES.find(c => c.id === id); }
+function fcKnownSet(catId) {
+  if (!state.flashProgress) state.flashProgress = {};
+  if (!state.flashProgress[catId]) state.flashProgress[catId] = [];
+  return state.flashProgress[catId];
+}
+
+function showFlashcards() {
+  document.getElementById('fc-categories').innerHTML = VOCAB_CATEGORIES.map(cat => {
+    const known = fcKnownSet(cat.id).length;
+    const total = cat.words.length;
+    const pct = total ? Math.round(known / total * 100) : 0;
+    return `
+      <button class="fc-cat-card" onclick="showFlashDeck('${cat.id}')">
+        <div class="fc-cat-pct">${pct}%</div>
+        <div class="fc-cat-body">
+          <div class="fc-cat-title">${cat.emoji || '🃏'} ${cat.title}</div>
+          <div class="fc-cat-sub">${total} ${fcPluralWords(total)}</div>
+        </div>
+        <div class="fc-cat-arrow">›</div>
+      </button>`;
+  }).join('');
+  showScreen('screen-flashcards');
+}
+
+function showFlashDeck(catId) {
+  const cat = fcCat(catId);
+  if (!cat) return;
+  fcState.catId = catId;
+  fcState.cat = cat;
+  document.getElementById('fc-deck-title').textContent = `${cat.emoji || '🃏'} ${cat.title}`;
+  document.getElementById('fc-wordlist').innerHTML = cat.words.map(w => `
+    <div class="fc-word-row">
+      <div class="fc-word-el">${w.greek}${w.transcription ? ` <span class="fc-word-tr">[${w.transcription}]</span>` : ''}</div>
+      <div class="fc-word-ru">${w.translation}</div>
+    </div>`).join('');
+  showScreen('screen-fc-deck');
+}
+
+function openFlashDirection() { document.getElementById('fc-direction-modal').style.display = 'flex'; }
+function closeFlashDirection() { document.getElementById('fc-direction-modal').style.display = 'none'; }
+
+// --- Флеш-карты: голосование Знаю / Не знаю ---
+function startFlashVote(dir) {
+  closeFlashDirection();
+  if (!trialGate()) return;
+  const cat = fcState.cat; if (!cat) return;
+  fcState.mode = 'vote';
+  fcState.dir = dir;
+  fcState.resume = false;
+  fcState.queue = shuffle(cat.words);
+  fcState.index = 0;
+  fcState.know = 0;
+  fcState.dont = 0;
+  // вернуть кнопки, если их скрыл экран «Готово»
+  document.querySelector('#screen-fc-vote .fc-vote-actions').style.display = '';
+  document.querySelector('#screen-fc-vote .fc-vote-stats').style.display = '';
+  document.querySelector('#screen-fc-vote .fc-skip').style.display = '';
+  document.getElementById('fc-vote-title').textContent = `${cat.emoji || '🃏'} ${cat.title}`;
+  renderFlashVote();
+  showScreen('screen-fc-vote');
+}
+
+function renderFlashVote() {
+  const total = fcState.queue.length;
+  if (fcState.index >= total) { finishFlashVote(); return; }
+  const w = fcState.queue[fcState.index];
+  fcState.currentWord = w;
+  fcState.revealed = false;
+  const front = fcState.dir === 'de2ru' ? w.greek : w.translation;
+  const back = fcState.dir === 'de2ru' ? w.translation : w.greek;
+  document.getElementById('fc-vote-tag').textContent = fcState.dir === 'de2ru' ? 'СЛОВО' : 'ПЕРЕВОД';
+  document.getElementById('fc-vote-front').textContent = front;
+  document.getElementById('fc-vote-front-tr').textContent = (fcState.dir === 'de2ru' && w.transcription) ? `[${w.transcription}]` : '';
+  const backEl = document.getElementById('fc-vote-back');
+  backEl.textContent = back;
+  backEl.style.display = 'none';
+  const hint = document.getElementById('fc-vote-hint');
+  hint.textContent = 'Нажми, чтобы увидеть перевод';
+  hint.style.display = '';
+  updateFlashVoteStats();
+}
+
+function revealFlashVote() {
+  if (fcState.revealed) return;
+  fcState.revealed = true;
+  document.getElementById('fc-vote-back').style.display = '';
+  document.getElementById('fc-vote-hint').style.display = 'none';
+}
+
+function updateFlashVoteStats() {
+  document.getElementById('fc-stat-total').textContent = fcState.queue.length;
+  document.getElementById('fc-stat-know').textContent = fcState.know;
+  document.getElementById('fc-stat-dont').textContent = fcState.dont;
+}
+
+function answerFlashVote(known) {
+  const w = fcState.queue[fcState.index];
+  if (!w) return;
+  const set = fcKnownSet(fcState.catId);
+  if (known) {
+    fcState.know++;
+    if (!set.includes(w.greek)) set.push(w.greek);
+  } else {
+    fcState.dont++;
+    const i = set.indexOf(w.greek); if (i >= 0) set.splice(i, 1);
+    fcState.queue.push(w); // незнакомые копятся — повторим в конце
+  }
+  saveState();
+  fcState.index++;
+  afterVoteAdvance();
+}
+
+function afterVoteAdvance() {
+  // Пауза каждые FC_BATCH слов: «продолжим или на сегодня хватит?»
+  if (fcState.index > 0 && fcState.index % FC_BATCH === 0 && fcState.index < fcState.queue.length) {
+    showFlashBreak();
+    return;
+  }
+  renderFlashVote();
+}
+
+function skipFlashVote() {
+  const w = fcState.queue[fcState.index];
+  if (w) fcState.queue.push(w);
+  fcState.index++;
+  afterVoteAdvance();
+}
+
+function finishFlashVote() {
+  const total = fcState.know + fcState.dont;
+  document.getElementById('fc-vote-tag').textContent = '';
+  document.getElementById('fc-vote-front').textContent = '🎉';
+  document.getElementById('fc-vote-front-tr').textContent = '';
+  document.getElementById('fc-vote-back').style.display = 'none';
+  const hint = document.getElementById('fc-vote-hint');
+  hint.style.display = '';
+  hint.textContent = `Готово! Знаешь ${fcState.know} из ${total}`;
+  document.querySelector('#screen-fc-vote .fc-vote-actions').style.display = 'none';
+  document.querySelector('#screen-fc-vote .fc-vote-stats').style.display = 'none';
+  document.querySelector('#screen-fc-vote .fc-skip').style.display = 'none';
+  try { playSound('complete'); } catch (e) {}
+}
+
+// --- Просмотр: слово → перевод сам, с озвучкой ---
+function startFlashView() {
+  if (!trialGate()) return;
+  const cat = fcState.cat; if (!cat) return;
+  fcState.resume = false;
+  fcState.mode = 'view';
+  fcState.words = shuffle(cat.words);
+  fcState.index = 0;
+  fcState.viewSpeed = 1;
+  fcState.viewPlaying = true;
+  document.getElementById('fc-view-speed').textContent = '1.0x';
+  document.getElementById('fc-view-play').textContent = '⏸';
+  showScreen('screen-fc-view');
+  renderFlashViewCard();
+}
+
+function renderFlashViewCard() {
+  const w = fcState.words[fcState.index];
+  if (!w) { stopFlashView(); showFlashDeck(fcState.catId); return; }
+  // Пауза каждые FC_BATCH слов (кроме момента продолжения)
+  if (!fcState.resume && fcState.index > 0 && fcState.index % FC_BATCH === 0) {
+    showFlashBreak();
+    return;
+  }
+  fcState.resume = false;
+  fcState.currentWord = w;
+  document.getElementById('fc-view-word').textContent = w.greek;
+  document.getElementById('fc-view-tr').textContent = w.transcription || '';
+  const tr = document.getElementById('fc-view-translation');
+  tr.textContent = '';
+  tr.style.opacity = '0';
+  document.getElementById('fc-view-counter').textContent = `${fcState.index + 1}/${fcState.words.length}`;
+  document.getElementById('fc-view-progress-fill').style.width = (fcState.index / fcState.words.length * 100) + '%';
+  playFlashWord();
+  scheduleFlashView();
+}
+
+function scheduleFlashView() {
+  clearFlashViewTimers();
+  if (!fcState.viewPlaying) return;
+  const revealMs = 2200 / fcState.viewSpeed;
+  const nextMs = 1600 / fcState.viewSpeed;
+  fcState.viewTimer = setTimeout(() => {
+    const tr = document.getElementById('fc-view-translation');
+    const w = fcState.words[fcState.index];
+    if (w) { tr.textContent = w.translation; tr.style.opacity = '1'; }
+    fcState.viewTimer = setTimeout(() => {
+      fcState.index++;
+      renderFlashViewCard();
+    }, nextMs);
+  }, revealMs);
+}
+
+function clearFlashViewTimers() { if (fcState.viewTimer) { clearTimeout(fcState.viewTimer); fcState.viewTimer = null; } }
+
+function toggleFlashView() {
+  fcState.viewPlaying = !fcState.viewPlaying;
+  document.getElementById('fc-view-play').textContent = fcState.viewPlaying ? '⏸' : '▶️';
+  if (fcState.viewPlaying) scheduleFlashView(); else clearFlashViewTimers();
+}
+
+function cycleFlashSpeed() {
+  const speeds = [1, 1.5, 2];
+  const i = speeds.indexOf(fcState.viewSpeed);
+  fcState.viewSpeed = speeds[(i + 1) % speeds.length];
+  document.getElementById('fc-view-speed').textContent = fcState.viewSpeed.toFixed(1) + 'x';
+  if (fcState.viewPlaying) scheduleFlashView();
+}
+
+function stopFlashView() { fcState.viewPlaying = false; clearFlashViewTimers(); }
+
+function playFlashWord() {
+  const w = fcState.currentWord;
+  if (w) speakGreek(w.greek);
+}
+
+// ============================================================
 // SCENARIOS
 // ============================================================
 function showScenarios() {
@@ -1404,6 +1743,7 @@ function showScenarios() {
 }
 
 function startScenario(id) {
+  if (!trialGate()) return;
   const scenario = SCENARIOS.find(s => s.id === id);
   if (!scenario) return;
   scenarioState = { scenarioId: id, currentStep: 0, score: 0, answered: false };
@@ -2691,6 +3031,7 @@ function searchVocab(query) {
 }
 
 function startVocabQuiz(categoryId) {
+  if (!trialGate()) return;
   const category = VOCAB_CATEGORIES.find(c => c.id === categoryId);
   if (!category) return;
   const words = shuffle([...category.words]).slice(0, 10);
@@ -2877,6 +3218,7 @@ function showQuiz() {
 }
 
 function startQuiz(categoryId) {
+  if (!trialGate()) return;
   const cat = QUIZ_CATEGORIES.find(c => c.id === categoryId);
   if (!cat) return;
   // Берём 10 предложений: сортируем по сложности, выбираем равномерно
