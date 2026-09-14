@@ -350,7 +350,10 @@ function isNativeApp() {
 // Пропускать ли в контент. Гостю дан пробник, дальше — окно с объяснением.
 // Прогресс гостя живёт в localStorage и переносится в новый аккаунт при входе.
 function trialGate() {
-  if (hasSubscription) return true;
+  // __iziNativeSubscription — подписка Apple: натив-гость без аккаунта тоже может её
+  // иметь, а onAuthStateChanged гостю сбрасывает hasSubscription в false (иначе
+  // оплативший гость после перезапуска упрётся в пробник).
+  if (hasSubscription || window.__iziNativeSubscription === true) return true;
   if ((state.lessonsCompleted || 0) < TRIAL_LESSONS) return true;
   showTrialModal();
   return false;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'izigerman-v8';
+const CACHE_NAME = 'izigerman-v9';
 const ASSETS = [
   './',
   './index.html',
