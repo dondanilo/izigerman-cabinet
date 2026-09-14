@@ -299,8 +299,9 @@ async function confirmDeleteAccount() {
       myPosts.forEach(d => batch.delete(d.ref));
       await batch.commit();
     }
-    // 2. Подписка на пуши и документ пользователя
+    // 2. Подписка на пуши (веб + iOS APNs) и документ пользователя
     await db.collection('push_subscriptions').doc(uid).delete().catch(() => {});
+    await db.collection('apns_subscriptions').doc(uid).delete().catch(() => {});
     await db.collection('users').doc(uid).delete().catch(() => {});
     // (subscriptions/{email} не трогаем — платёжная запись, правила write:false)
 
@@ -427,10 +428,9 @@ function updateGuestUi() {
   if (pwSignout) pwSignout.style.display = isGuest ? 'none' : '';
 }
 
-// TODO: сгенерировать свою пару ключей: npx web-push generate-vapid-keys
-// Публичный — сюда, приватный — в переменные окружения Vercel (в код не класть).
-// Ключ ниже принадлежит IziTurkish: с ним push-подписки будут невалидны.
-const VAPID_PUBLIC_KEY = 'TODO_VAPID_PUBLIC_KEY';
+// VAPID public для веб-пушей (пара под izigerman, 2026-09-14). Приватный —
+// в env Vercel izigerman-webhook (в код НЕ класть). ОБЯЗАН совпадать со значением там.
+const VAPID_PUBLIC_KEY = 'BE4l7j1re5EI5fwq3YkAoyBFB7DGVzPJqf-QfIIwIn6-kW-vOmZD7NEWduYSdpKjUXpBeriLNBE-8QeGhLhMgxY';
 
 function urlBase64ToUint8Array(base64) {
   const padding = '='.repeat((4 - base64.length % 4) % 4);
@@ -439,7 +439,28 @@ function urlBase64ToUint8Array(base64) {
   return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
 }
 
+// native-bridge.js получает APNs device-token и шлёт событие 'apnsToken'; здесь
+// сохраняем его в Firestore-коллекцию apns_subscriptions/{uid}, откуда крон
+// izigerman-webhook рассылает по APNs.
+async function saveApnsToken(token) {
+  if (!token || !currentUser) return;
+  try {
+    await db.collection('apns_subscriptions').doc(currentUser.uid).set({
+      token,
+      uid: currentUser.uid,
+      platform: 'ios',
+      updatedAt: new Date().toISOString()
+    });
+  } catch (e) { console.error('saveApnsToken error:', e); }
+}
+
 async function setupPushNotifications() {
+  // iOS-приложение: запрашиваем разрешение и регистрируемся на APNs, а не Web Push.
+  if (isNativeApp()) {
+    if (typeof window.__nativeRegisterPush === 'function') window.__nativeRegisterPush();
+    if (window.__APNS_TOKEN) saveApnsToken(window.__APNS_TOKEN); // токен мог прийти до входа
+    return;
+  }
   if (!('Notification' in window) || !('PushManager' in window)) return;
   if (Notification.permission === 'denied') return;
   try {
@@ -742,6 +763,9 @@ async function init() {
     }
   }
 
+  // APNs device-token из native-bridge.js → сохраняем в apns_subscriptions/{uid}.
+  window.addEventListener('apnsToken', (e) => { saveApnsToken(e.detail); });
+
   // Подписываемся на состояние авторизации.
   // Гость (user === null) больше НЕ упирается в экран входа — он попадает на
   // главную и получает пробные уроки (TRIAL_LESSONS). Вход/подписка требуются
@@ -768,8 +792,9 @@ async function init() {
       showPaywall();          // гость вошёл ради оформления — показываем планы
     } else {
       showScreen('screen-home');
-      // Тихо обновляем подписку на пуши у вошедших с доступом
-      if (user && hasSubscription && pushPermission() === 'granted') {
+      // Тихо обновляем подписку на пуши у вошедших: на нативе регистрируем APNs
+      // всегда (там нет Notification), в вебе — только если разрешение уже дано.
+      if (user && (isNativeApp() || pushPermission() === 'granted')) {
         setTimeout(setupPushNotifications, 3000);
       }
     }
@@ -1184,6 +1209,8 @@ function completeLesson() {
     state.currentLesson = Math.min((state.currentLesson || 1) + 1, mods.length);
   }
   saveState();
+  // Запрос оценки в App Store после нескольких уроков (нативный, в вебе no-op).
+  if (typeof window.__iziMaybeReview === 'function') window.__iziMaybeReview(state.lessonsCompleted);
   checkAchievements({ perfectLesson: isPerfect, weakMode: lessonState.isWeakMode });
   createPost('lesson_complete', {
     isPerfect,

@@ -20,6 +20,11 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
+    // iOS APNs subscriptions — own only
+    match /apns_subscriptions/{uid} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
     // Social feed posts
     match /posts/{postId} {
       // Anyone logged in can read all posts
